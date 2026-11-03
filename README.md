@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Sprint4-Python
 =======
 # NEXTCODE | SMARTSTUDY
@@ -79,4 +78,5 @@ O sistema consegue:
 - a validação de links é baseada em uma lista permitida e não substitui análise antiphishing real;
 - a consulta externa de livros usa Open Library e a geração de flashcards por conceito usa a Wikipedia REST API;
 - os dados locais continuam armazenados em arquivos JSON do projeto.
->>>>>>> 87215cf (Sprint4-Python)
+
+- (Sprint4-Python)
