@@ -1,5 +1,4 @@
 # Sprint4-Python
-=======
 # NEXTCODE | SMARTSTUDY
 
 ## Visão geral
