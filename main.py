@@ -10,9 +10,20 @@ DAYS = {
     "4": "Quinta-feira", "5": "Sexta-feira", "6": "Sábado"
 }
 
+MAIN_OPTIONS = ["0", "1", "2", "3", "4", "5", "6", "7", "8"]
+
+# Erros esperados ao consultar uma API: dado inválido/ausente (ValueError,
+# inclui JSON inválido), falha de rede (OSError, inclui URLError e HTTPError)
+# e esgotamento das tentativas (RuntimeError).
+API_ERRORS = (ValueError, OSError, RuntimeError)
+
 
 def pause():
-    input("\nPressione Enter para voltar ao menu...")
+    """Aguarda Enter; uma entrada encerrada ou Ctrl+C apenas segue para o menu."""
+    try:
+        input("\nPressione Enter para voltar ao menu...")
+    except (KeyboardInterrupt, EOFError):
+        print()
 
 
 def show_menu():
@@ -27,6 +38,7 @@ def show_menu():
     print("5. Grade de aulas")
     print("6. Buscar livros acadêmicos (API externa)")
     print("7. Criar e revisar flashcards")
+    print("8. Quiz de múltipla escolha (API gratuita)")
     print("0. Encerrar")
     print("=" * 62)
 
@@ -173,6 +185,62 @@ def academic_search(app, crawler):
     pause()
 
 
+def choose_math_subject(app):
+    """Pede a matéria (nome ou número da lista). Retorna a matéria ou None se cancelar."""
+    subjects = app.available_math_subjects()
+    print("Matérias disponíveis:")
+    for index, item in enumerate(subjects, start=1):
+        print(f"  {index}. {item}")
+    while True:
+        raw_subject = input("Digite a matéria ou número (ou 'sair' para cancelar): ").strip()
+        if raw_subject.lower() in {"sair", "0", "exit", "quit"}:
+            print("Operação cancelada.")
+            return None
+        if raw_subject.isdecimal():
+            number = int(raw_subject)
+            if 1 <= number <= len(subjects):
+                return subjects[number - 1]
+            print(f"Número inválido. Escolha entre 1 e {len(subjects)}.")
+            continue
+        try:
+            return app.resolve_subject(raw_subject)
+        except ValueError as error:
+            print(error)
+
+
+def create_flashcards_from_api(app):
+    subject = choose_math_subject(app)
+    if subject is None:
+        return
+    while True:
+        print(f"Consultando a API para {subject}...")
+        try:
+            created = app.create_api_flashcards(subject, limit=10)
+        except API_ERRORS as error:
+            print(f"Não foi possível gerar os flashcards: {error}")
+            if read_yes_no("Tentar novamente? (S/N): "):
+                continue
+            return
+        if created:
+            print(f"{created} flashcards criados e salvos para {subject}.")
+        else:
+            print("Os flashcards foram gerados, mas não foi possível salvá-los. Nenhum cartão foi adicionado.")
+        return
+
+
+def review_flashcards(app):
+    subject = input("Filtrar disciplina (Enter para todos): ").strip()
+    cards = [card for card in app.data["flashcards"]
+             if not subject or subject.casefold() in card["subject"].casefold()]
+    if not cards:
+        print("Nenhum flashcard encontrado.")
+        return
+    for card in SmartStudy.randomize(cards):
+        print(f"\n[{card['subject']}] {card['question']}")
+        input("Pressione Enter para revelar a resposta...")
+        print(f"Resposta: {card['answer']}")
+
+
 def flashcards_menu(app):
     while True:
         print("\n--- FLASHCARDS ---")
@@ -185,63 +253,75 @@ def flashcards_menu(app):
             question = read_text("Pergunta/frente do cartão: ")
             answer = read_text("Resposta/verso do cartão: ")
             print("Flashcard salvo." if app.add_flashcard(subject, question, answer) else "Falha ao salvar.")
-        elif option == "3":
-            subjects = app.available_math_subjects()
-            print("Matérias disponíveis:")
-            for index, item in enumerate(subjects, start=1):
-                print(f"  {index}. {item}")
-            while True:
-                raw_subject = input("Digite a matéria ou número (ou 'sair' para cancelar): ").strip()
-                if raw_subject.lower() in {"sair", "0", "exit", "quit"}:
-                    print("Operação cancelada.")
-                    break
-                try:
-                    if raw_subject.isdigit():
-                        subject = subjects[int(raw_subject) - 1]
-                    else:
-                        subject = app.resolve_subject(raw_subject)
-                    created = app.create_api_flashcards(subject, limit=10)
-                    print(f"10 flashcards criados para {subject} via API gratuita.")
-                    break
-                except Exception as error:
-                    print(f"Não foi possível gerar os flashcards: {error}")
-                    retry = input("Tentar novamente? (S/N): ").strip().lower()
-                    if retry in {"n", "nao", "não", "0"}:
-                        break
+        elif option == "2":
+            review_flashcards(app)
         else:
-            subject = input("Filtrar disciplina (Enter para todos): ").strip()
-            cards = [card for card in app.data["flashcards"]
-                     if not subject or subject.casefold() in card["subject"].casefold()]
-            if not cards:
-                print("Nenhum flashcard encontrado.")
-                pause()
-                continue
-            random_cards = cards[:]
-            import random
-            random.shuffle(random_cards)
-            for card in random_cards:
-                print(f"\n[{card['subject']}] {card['question']}")
-                input("Pressione Enter para revelar a resposta...")
-                print(f"Resposta: {card['answer']}")
+            create_flashcards_from_api(app)
         pause()
+
+
+def run_quiz(questions):
+    """Aplica as questões no terminal e retorna a quantidade de acertos."""
+    score = 0
+    for number, question in enumerate(questions, start=1):
+        options = SmartStudy.randomize(question["options"])
+        print(f"\nQuestão {number}/{len(questions)}: {question['question']}")
+        for index, text in enumerate(options, start=1):
+            print(f"  {index}. {text}")
+        choice = read_option(f"Sua resposta [1-{len(options)}]: ",
+                             [str(index) for index in range(1, len(options) + 1)])
+        if options[int(choice) - 1] == question["answer"]:
+            score += 1
+            print("Correto!")
+        else:
+            print(f"Incorreto. Resposta certa: {question['answer']}")
+        print(f"Explicação: {question['explanation']}")
+    return score
+
+
+def quiz_menu(app):
+    print("\n--- QUIZ DE MÚLTIPLA ESCOLHA ---")
+    print("As questões são montadas a partir de resumos da Wikipedia (API gratuita).")
+    subject = choose_math_subject(app)
+    if subject is None:
+        return
+    total = read_integer("Quantas questões deseja responder (1 a 10)? ", maximum=10)
+    while True:
+        print(f"Consultando a API para {subject}...")
+        try:
+            questions = app.generate_math_quiz(subject, limit=total)
+            break
+        except API_ERRORS as error:
+            print(f"Não foi possível montar o quiz: {error}")
+            if not read_yes_no("Tentar novamente? (S/N): "):
+                return
+    score = run_quiz(questions)
+    print(f"\nResultado: {score} de {len(questions)} questões corretas "
+          f"({round(100 * score / len(questions))}%).")
+    pause()
 
 
 def main():
     app = SmartStudy(JsonStorage())
     crawler = OpenLibraryCrawler()
+    actions = {
+        "1": lambda: intelligent_mode(app),
+        "2": lambda: scan_document(app),
+        "3": lambda: gallery(app),
+        "4": lambda: qr_reader(app),
+        "5": lambda: schedule_menu(app),
+        "6": lambda: academic_search(app, crawler),
+        "7": lambda: flashcards_menu(app),
+        "8": lambda: quiz_menu(app)
+    }
     print("Dados carregados. Alterações serão salvas em data/smartstudy.json.")
     while True:
         show_menu()
-        option = read_option("Selecione uma funcionalidade: ", ["0", "1", "2", "3", "4", "5", "6", "7"])
-        actions = {
-            "1": lambda: intelligent_mode(app),
-            "2": lambda: scan_document(app),
-            "3": lambda: gallery(app),
-            "4": lambda: qr_reader(app),
-            "5": lambda: schedule_menu(app),
-            "6": lambda: academic_search(app, crawler),
-            "7": lambda: flashcards_menu(app)
-        }
+        try:
+            option = read_option("Selecione uma funcionalidade: ", MAIN_OPTIONS)
+        except (KeyboardInterrupt, EOFError):
+            print("\nExecução interrompida. Seus dados permanecem salvos.")
+            break
         if option == "0":
             print("\nSmartStudy encerrado. Seus dados permanecem salvos.")
             break
