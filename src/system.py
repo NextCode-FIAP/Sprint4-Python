@@ -76,15 +76,24 @@ class SmartStudy:
         return self.persist()
 
     def create_api_flashcards(self, subject, limit=10):
+        """Gera flashcards pela API e os persiste.
+
+        Retorna a quantidade de cartões efetivamente salvos. Se a gravação
+        falhar, os cartões são removidos da memória e o retorno é 0, para que
+        o programa nunca informe um sucesso que não aconteceu.
+        """
         cards = self.generate_math_flashcards(subject, limit=limit)
-        for card in cards:
-            self.data["flashcards"].append({
-                "id": self._next_id(self.data["flashcards"]),
-                "subject": subject,
-                "question": card["question"],
-                "answer": card["answer"],
-            })
-        return self.persist()
+        first_id = self._next_id(self.data["flashcards"])
+        new_items = [
+            {"id": first_id + offset, "subject": subject,
+             "question": card["question"], "answer": card["answer"]}
+            for offset, card in enumerate(cards)
+        ]
+        self.data["flashcards"].extend(new_items)
+        if self.persist():
+            return len(new_items)
+        del self.data["flashcards"][len(self.data["flashcards"]) - len(new_items):]
+        return 0
 
     @staticmethod
     def normalize_text(value):
@@ -335,3 +344,4 @@ class SmartStudy:
     @staticmethod
     def _next_id(items):
         return max((item.get("id", 0) for item in items), default=0) + 1
+
